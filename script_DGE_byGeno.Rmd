@@ -1,0 +1,230 @@
+---
+title: "Differential gene exression by genotype"
+date: Sept. 27th 2022
+editor_options: 
+  chunk_output_type: console
+---
+
+Load packages
+```{r}
+packages<-c("broom", "reshape2", "ggplot2", "pheatmap", "ggrepel", "dplyr", "RColorBrewer", "viridis","DESeq2","BiocParallel")
+invisible(lapply(packages, library, character.only = TRUE))
+
+setwd("/Users/valentina/Box Sync/PeruProject/0_AACR_Grant/eQTL/gene_expression_byGeno")
+```
+
+```{r}
+cts<-read.table("/Users/valentina/Box Sync/PeruProject/0_RNAseq/Aligned_Counts/276Samples/gene.counts.271.samples.txt", header=TRUE, check.names = F)
+rownames(cts) <- cts[, 1]  ## set rownames
+cts <- cts[,-1]
+
+coldata<-read.csv("/Users/valentina/Box Sync/PeruProject/0_RNAseq/pheno_257_SeqSamples.csv", header=TRUE)
+### Check that sample names match in both files
+str(coldata)
+coldata$rs140068132<-as.factor(coldata$rs140068132)
+coldata$AGE_DX<-as.numeric(as.character(coldata$AGE_DX))
+
+cts<-cts[,coldata$PersonID]
+all(colnames(cts)==coldata$PersonID)  
+
+#remove: Normal-like, uncert and stage IV and rs140068132-GG
+coldata$pam50<-as.character(coldata$pam50)
+coldata$pam50_subt<-coldata$pam50
+coldata$pam50_subt[coldata$pam50_subt=="LumB_uncert"]<-"missing"
+coldata$pam50_subt[coldata$pam50_subt=="Her2_uncert"]<-"missing"
+coldata$pam50_subt[is.na(coldata$pam50_subt)]<-"missing"
+coldata$pam50_subt<-droplevels(as.factor(coldata$pam50_subt))
+coldata$pam50_subt <- factor(coldata$pam50_subt, levels=c('LumA','LumB','Her2','Basal'))
+coldata$SUBTYPE_noKI67_1 <-as.factor(coldata$SUBTYPE_noKI67_1)
+coldata$SUBTYPE_noKI67_1 <- factor(coldata$SUBTYPE_noKI67_1,
+levels=c('LUMINAL_A','LUMINAL_B','HER2+','TNBC'))
+coldata$STAGE_EC_1<-as.factor(coldata$STAGE_EC_1)
+levels(coldata$STAGE_EC_1)
+coldata$age_cat<-NA
+coldata$AGE_DX<-as.numeric(coldata$AGE_DX)
+coldata$NAM<-as.numeric(coldata$NAM)
+coldata$ageCat[coldata$AGE_DX<50]<-"below50"
+coldata$ageCat[coldata$AGE_DX>=50]<-"above-equal50"
+coldata$ageCat[is.na(coldata$AGE_DX)]<-NA
+coldata$ageCat<-as.factor(coldata$age_cat)
+remove<-coldata[which(coldata$STAGE_EC_1=="IV"|is.na(coldata$STAGE_EC_1)|coldata$rs140068132==2),]$PersonID
+coldata2<-coldata[!(coldata$PersonID%in%remove),]
+
+cts2<-cts[,coldata2$PersonID]
+cts2 <- mutate_all(cts2, function(x) as.numeric(as.character(x)))
+
+all(colnames(cts2)==coldata2$PersonID) 
+coldata2$rs140068132<-droplevels(coldata2$rs140068132)
+```
+
+Deseq
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = cts2,
+                              colData = coldata2,
+                              design=~rs140068132+AGE_DX+NAM)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- DESeq(dds,fitType="local", betaPrior=FALSE,parallel=TRUE,BPPARAM=MulticoreParam(6))
+resultsNames(dds)
+
+res <- results(dds, alpha=0.05, name= "rs140068132_1_vs_0")
+sum(res$padj < 0.05, na.rm=TRUE)
+summary(res)
+
+res_order <- res[order(res$padj),]
+head(res_order)
+
+results <- as.data.frame(mutate(as.data.frame(res_order), FDRsig=ifelse(res_order$padj<0.05, "FDR<0.05", "Not Sig")), row.names=rownames(res_order))
+results$nomSig<-ifelse(results$pvalue<0.05, "Sig", "nonSig")
+
+head(results)
+results <- tibble::rownames_to_column(results, "gene")
+
+genes<-c("CCDC170","ESR1","PLEKHG1","MTHFD1L","AKAP12","RMND1","SYNE1","ARMT1","ZBTB2")
+
+res_6q<-results[which(results$gene%in%genes),]
+res_6q$subtype<-"all"
+
+#rm(dds,res,results)
+```
+
+#Same, by subtype
+```{r}
+r<-setNames(data.frame(matrix(ncol = 11, nrow = 0)), c("gene","baseMean","log2FoldChange","lfcSE","stat","pvalue","padj","FDRsig","nomSig", "FC", "subtype"))
+
+for (i in levels(coldata2$pam50_subt)){
+  print(i)
+  coldat<-coldata2[which(coldata2$pam50_subt==i),]
+  cts3<-cts2[,coldat$PersonID]
+  print(all(colnames(cts3)==coldat$PersonID))  
+
+dds <- DESeqDataSetFromMatrix(countData = cts3,
+                              colData = coldat,
+                              design=~rs140068132+AGE_DX+NAM)
+
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- DESeq(dds,fitType="local", betaPrior=FALSE,parallel=TRUE,BPPARAM=MulticoreParam(6))
+resultsNames(dds)
+
+res <- results(dds, alpha=0.05,name="rs140068132_1_vs_0")
+sum(res$padj < 0.05, na.rm=TRUE)
+summary(res)
+
+res_order <- res[order(res$padj),]
+head(res_order)
+results <- as.data.frame(mutate(as.data.frame(res_order), FDRsig=ifelse(res_order$padj<0.05, "FDR<0.05", "FDR_NotSig")), row.names=rownames(res_order))
+results <- tibble::rownames_to_column(results, "gene")
+results$nomSig<-ifelse(results$pvalue<0.05, "Sig", "NonSig")
+head(results)
+results$FC<-2^results$log2FoldChange
+results$subtype<-as.character(i)
+res_sub<-results[which(results$gene%in%genes),]
+r<-rbind(r,res_sub)
+}
+
+rm(dds,res,results,res_sub)
+```
+
+BY LUMINAL STATUS
+```{r}
+lums<-setNames(data.frame(matrix(ncol = 11, nrow = 0)), c("gene","baseMean","log2FoldChange","lfcSE","stat","pvalue","padj","FDRsig","nomSig", "FC", "subtype"))
+
+for (i in c("Lum", "Basal|Her")){
+  print(i)
+  coldat<-coldata2[grepl(i,coldata2$pam50_subt),]
+  cts3<-cts2[,coldat$PersonID]
+  print(all(colnames(cts3)==coldat$PersonID))  
+
+dds <- DESeqDataSetFromMatrix(countData = cts3,
+                              colData = coldat,
+                              design=~rs140068132+AGE_DX+NAM)
+
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- DESeq(dds,fitType="local", betaPrior=FALSE,parallel=TRUE,BPPARAM=MulticoreParam(6))
+resultsNames(dds)
+
+res <- results(dds, alpha=0.05, name="rs140068132_1_vs_0")
+sum(res$padj < 0.05, na.rm=TRUE)
+summary(res)
+
+res_order <- res[order(res$padj),]
+head(res_order)
+results <- as.data.frame(mutate(as.data.frame(res_order), FDRsig=ifelse(res_order$padj<0.05, "FDR<0.05", "FDR_NotSig")), row.names=rownames(res_order))
+results <- tibble::rownames_to_column(results, "gene")
+results$nomSig<-ifelse(results$pvalue<0.05, "Sig", "NonSig")
+head(results)
+results$FC<-2^results$log2FoldChange
+results$subtype<-ifelse(i=="Lum", "lum","nonLum")
+res_sub<-results[which(results$gene%in%genes),]
+lums<-rbind(lums,res_sub)
+}
+
+rm(dds,res,results,res_sub)
+```
+
+
+Merge all results
+```{r}
+all<-rbind(res_6q,r,lums)
+all<-all[c(1:5,7,8,6,9,11,10)]  #arregkar este orden
+write.csv(all, file="Deseq_byGeno_6q25genes_all_models_adj-age-nam.csv", row.names=F)
+```
+
+
+
+PLOT GENES
+```{r}
+norm<-counts(dds, normalized=TRUE) #use these the right data set to plot (all samples, luminals, only etc)
+norm2<-norm[rownames(norm)%in%genes,]
+
+df<-as.data.frame(t(norm2))
+df <- tibble::rownames_to_column(df, "PersonID") # Apply rownames_to_column
+df<-left_join(df,coldata2[c("PersonID","STAGE_EC_1","pam50_subt","SUBTYPE_noKI67_1","age_cat","rs140068132","AGE_DX", "NAM")], by="PersonID")
+df[genes] <- lapply(df[genes], function(x) as.numeric(as.character(x)))
+
+df2 <- reshape2::melt(df, id.vars = c("PersonID","STAGE_EC_1","pam50_subt","SUBTYPE_noKI67_1","age_cat","rs140068132","AGE_DX","NAM"),variable.name = "gene", value.name = "count")
+head(df2)
+
+#format
+df2$rs140068132<-as.factor(df2$rs140068132)
+levels(df2$rs140068132)<-c("AA","AG","GG")
+#para qplotear los genes en orden alfabetico:
+df2$gene<-as.character(df2$gene)
+sort(unique(df2$gene))  ## arreglar esto para q quede por orden alfabetico
+df2$gene <- factor(df2$gene,levels=unique(df2$gene))
+df2$log2<-log((df2$count+1),2)
+# add p-value to each gene name:
+df3<-left_join(df2,results[c("pvalue","gene", "FC")],by="gene")
+df3$pvalue<-ifelse(df3$pvalue<0.001, formatC(df3$pvalue, format = "e", digits = 1), round(df3$pvalue,3))
+df3$FC<-round(df3$FC,1)
+df3$gene2<-paste(df3$gene," (FC=",df3$FC,", p=",df3$pvalue,")",sep="")
+
+#Save file for future plots:
+write.csv(df3,file=paste("normalized_deseq_cnts_",i,".csv",sep=""), row.names=F)
+
+df3<-read.csv(paste("normalized_deseq_cnts_",i,".csv",sep=""), header=T)
+
+genes2<-c("ARMT1","CCDC170","ESR1","MTHFD1L","RMND1")
+df4<-df3[which(df3$gene%in%genes2),]
+
+ggplot(df4,aes(rs140068132, log2)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(fill="rs140068132"), size = 1.7,shape=21, position = position_jitterdodge()) + facet_wrap(~gene2,scales = "free_y",ncol=1) + labs(x="", y="", fill="",title="Basal" ) + theme(axis.text.x=element_text(size=9),axis.text.y=element_text(size=9), axis.title.x=element_text(size=10), axis.title.y=element_text(size=10), strip.text.x = element_text(size = 11),legend.text = element_text(size=10),legend.position="none")+scale_fill_manual(values="cyan4")
+
+#Expression (log2 transformed counts)  #title to include
+
+#add corr plot for these genes
+
+
+library(PerformanceAnalytics)
+df<-read.table("/Users/valentina/Box Sync/PeruProject/0_RNAseq/Aligned_Counts/276Samples/normDeseq.gene.counts.271.samples.txt", header=T, check.names = F)
+df2<-df[genes2,coldata2[which(coldata2$pam50_subt=="Basal"),]$PersonID]
+dim(df2)
+df3<-t(df2)
+df3<-log((df3+1),2)
+
+chart.Correlation(df3, histogram = TRUE, method = "pearson")
+
+```

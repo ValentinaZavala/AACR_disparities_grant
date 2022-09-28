@@ -5,7 +5,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-Load packages
+last try
 ```{r}
 packages<-c("broom", "reshape2", "ggplot2", "pheatmap", "ggrepel", "dplyr", "RColorBrewer", "viridis","DESeq2","BiocParallel")
 invisible(lapply(packages, library, character.only = TRUE))

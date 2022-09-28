@@ -4,6 +4,9 @@ date: Sept. 27th 2022
 editor_options: 
   chunk_output_type: console
 ---
+#File format:
+#cts= first column: gene-symbol followed by samples. Rounded values
+#coldata= first column: PersonID matching the column names in cts.
 
 Load packages
 ```{r}

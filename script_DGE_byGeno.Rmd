@@ -5,7 +5,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-ahora si
+Load packages
 ```{r}
 packages<-c("broom", "reshape2", "ggplot2", "pheatmap", "ggrepel", "dplyr", "RColorBrewer", "viridis","DESeq2","BiocParallel")
 invisible(lapply(packages, library, character.only = TRUE))
@@ -13,6 +13,7 @@ invisible(lapply(packages, library, character.only = TRUE))
 setwd("/Users/valentina/Box Sync/PeruProject/0_AACR_Grant/eQTL/gene_expression_byGeno")
 ```
 
+Load data
 ```{r}
 cts<-read.table("/Users/valentina/Box Sync/PeruProject/0_RNAseq/Aligned_Counts/276Samples/gene.counts.271.samples.txt", header=TRUE, check.names = F)
 rownames(cts) <- cts[, 1]  ## set rownames
